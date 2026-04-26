@@ -60,6 +60,7 @@
             letter-spacing: -2px;
             margin: 0;
             line-height: 1.1;
+            transition: opacity 0.4s ease-in-out; /* 부드러운 페이드 애니메이션 */
         }
     </style>
 </head>
@@ -70,7 +71,7 @@
         
         <div class="info-overlay" id="info-overlay">
             <div class="location-name" id="loc-name">SEOUL</div>
-            <div class="local-time" id="loc-time">--:--:--</div>
+            <div class="local-time" id="loc-time">--:--</div>
         </div>
     </div>
 
@@ -88,7 +89,7 @@
         let landDots = [];
 
         // DEV 모드 설정
-        let timeSpeed = 1;        // 1 = 실제 시간, DEV = 288배속 (24시간 = 5분)
+        let timeSpeed = 1;
         let simulationStartTime = Date.now();
         let realStartTime = Date.now();
 
@@ -102,7 +103,6 @@
         let projection = projectionBase.translate([width / 2, height / 2]).scale(160);
         let path = d3.geoPath().projection(projection).context(ctx);
 
-        // 현재 시뮬레이션 시간 반환
         function getSimulationTime() {
             if (timeSpeed === 1) return new Date();
             const elapsedReal = (Date.now() - realStartTime) / 1000;
@@ -110,7 +110,6 @@
             return new Date(simulationStartTime + simulatedMs);
         }
 
-        // 태양 위치 계산
         function getSunPosition(date) {
             const start = new Date(date.getUTCFullYear(), 0, 0);
             const diff = date - start;
@@ -126,7 +125,6 @@
             return { lon: subsolarLon, lat: decDeg };
         }
 
-        // 지도 초기화
         function initMap() {
             d3.json('https://unpkg.com/world-atlas@2.0.2/countries-110m.json').then(world => {
                 const landFeature = topojson.feature(world, world.objects.land);
@@ -152,7 +150,6 @@
             }).catch(err => console.error("맵 데이터 로드 실패", err));
         }
 
-        // 메인 드로우 루프 (지도)
         function draw() {
             const now = getSimulationTime();
             const sunPos = getSunPosition(now);
@@ -197,24 +194,39 @@
             requestAnimationFrame(draw);
         }
 
-        // 부드러운 시간 업데이트 (0.1초마다, 초 단위 표시)
+        // 부드러운 애니메이션 시간 업데이트 (HH:MM만 표시)
+        let lastDisplayedTime = '';
+
         function updateClock() {
             const now = getSimulationTime();
             const options = { 
                 timeZone: currentTimezone, 
                 hour: '2-digit', 
                 minute: '2-digit',
-                second: '2-digit',
                 hour12: false 
             };
+            
+            let timeString;
             try {
-                const timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
-                document.getElementById('loc-time').innerText = timeString;
+                timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
             } catch(e) {
                 const h = now.getHours().toString().padStart(2, '0');
                 const m = now.getMinutes().toString().padStart(2, '0');
-                const s = now.getSeconds().toString().padStart(2, '0');
-                document.getElementById('loc-time').innerText = `${h}:${m}`;
+                timeString = `${h}:${m}`;
+            }
+
+            // 시간이 실제로 바뀌었을 때만 애니메이션 실행
+            if (timeString !== lastDisplayedTime) {
+                const timeEl = document.getElementById('loc-time');
+                
+                timeEl.style.opacity = '0';   // 페이드 아웃
+
+                setTimeout(() => {
+                    timeEl.innerText = timeString;
+                    timeEl.style.opacity = '1';   // 페이드 인
+                }, 200); // 페이드 아웃 후 약간의 딜레이 후 텍스트 변경
+
+                lastDisplayedTime = timeString;
             }
         }
 
@@ -273,9 +285,9 @@
                 path = d3.geoPath().projection(projection).context(ctx);
             }
 
-            // 부드러운 시간 업데이트 시작 (0.1초 간격)
+            // 초기 표시 및 부드러운 업데이트 시작
             updateClock();
-            setInterval(updateClock, 100);
+            setInterval(updateClock, 100); // 0.1초마다 체크하여 부드럽게 반응
         }
 
         // 실행
