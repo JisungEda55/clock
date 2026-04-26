@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Apple Watch Inspired Clock Faces</title>
+
+<style>
+/* =========================================================
+   APPLE WATCH STYLE MULTI FACE
+   Single HTML / CSS / JS
+   ========================================================= */
+
+:root{
+  --bg:#000;
+  --white:#fff;
+  --gray:#5a5a5a;
+  --soft:#8e8e93;
+  --orange:#ff9f2f;
+  --blue:#73a4f4;
+  --blue2:#0d63b8;
+  --red:#ff3b30;
+}
+
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+
+html,body{
+  width:100%;
+  height:100%;
+  background:#000;
+  overflow:hidden;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Display",
+    "Pretendard",
+    "Segoe UI",
+    sans-serif;
+  user-select:none;
+}
+
+body{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+}
+
+#watch{
+  width:min(100vw,100vh * .82);
+  aspect-ratio:430 / 524;
+  background:#000;
+  position:relative;
+  overflow:hidden;
+}
+
+/* Shared */
+.face{
+  position:absolute;
+  inset:0;
+  display:none;
+}
+.face.active{display:block;}
+
+.topbar{
+  position:absolute;
+  top:18px;
+  left:20px;
+  right:20px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  z-index:20;
+}
+
+.status-left{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  color:#fff;
+  font-weight:700;
+  font-size:24px;
+}
+
+.signal{
+  width:20px;height:20px;
+  position:relative;
+}
+.signal:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-left:5px solid #fff;
+  border-top:5px solid transparent;
+  border-bottom:5px solid transparent;
+  transform:rotate(45deg);
+  border-radius:2px;
+}
+
+.status-right{
+  display:flex;
+  gap:10px;
+}
+.dot{
+  width:10px;height:10px;border-radius:50%;
+  background:#fff;
+  opacity:.9;
+}
+
+/* =========================================================
+   FACE 1 : WORLD MAP
+   ========================================================= */
+#face-map{
+  background:#000;
+}
+
+.world{
+  position:absolute;
+  inset:0;
+}
+
+.map-grid{
+  position:absolute;
+  inset:0;
+}
+
+.map-dot{
+  position:absolute;
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:#d8d8d8;
+  opacity:.95;
+}
+
+.map-dot.dim{
+  opacity:.28;
+}
+
+.city-block{
+  position:absolute;
+  left:22px;
+  bottom:85px;
+}
+
+.city-name{
+  color:var(--orange);
+  font-size:34px;
+  font-weight:700;
+  margin-bottom:8px;
+}
+
+.city-time{
+  color:#fff;
+  font-size:108px;
+  font-weight:800;
+  line-height:.9;
+  letter-spacing:-4px;
+}
+
+.orange-pin{
+  position:absolute;
+  width:18px;height:18px;border-radius:50%;
+  background:var(--orange);
+  box-shadow:0 0 20px rgba(255,160,50,.5);
+}
+
+.curve{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+.curve svg{
+  width:100%;
+  height:100%;
+}
+
+/* =========================================================
+   FACE 2 : SIMPLE BLUE
+   ========================================================= */
+#face-simple{
+  background:#000;
+}
+
+.bigTime{
+  position:absolute;
+  left:24px;
+  top:95px;
+  color:var(--blue);
+  font-size:250px;
+  font-weight:800;
+  letter-spacing:-10px;
+  line-height:.78;
+}
+
+.rightInfo{
+  position:absolute;
+  right:28px;
+  top:110px;
+  color:#fff;
+  text-align:left;
+  font-weight:700;
+}
+
+.rightInfo .date{
+  font-size:42px;
+  line-height:1.05;
+}
+
+.rightInfo .temp{
+  font-size:38px;
+  margin-top:6px;
+}
+
+.alarm{
+  position:absolute;
+  right:36px;
+  bottom:78px;
+  color:var(--blue);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:800;
+  font-size:54px;
+}
+
+.alarm svg{
+  width:32px;height:32px;
+}
+
+/* =========================================================
+   FACE 3 : OVERLAP BUBBLE
+   ========================================================= */
+#face-overlap{
+  background:#000;
+}
+
+.overlapWrap{
+  position:absolute;
+  inset:0;
+}
+
+.num{
+  position:absolute;
+  font-weight:900;
+  line-height:.8;
+  letter-spacing:-8px;
+}
+
+.n1{ left:18px; top:165px; font-size:255px; color:#0d63b8;}
+.n2{ left:115px; top:160px; font-size:255px; color:#6fa6f5;}
+.n3{ left:255px; top:160px; font-size:255px; color:#0d63b8;}
+.n4{ right:8px; top:160px; font-size:255px; color:#5ea0e3;}
+
+.colonBubble{
+  position:absolute;
+  width:64px;height:64px;border-radius:50%;
+  background:radial-gradient(circle at 30% 30%, #f5f7fb, #bfc6ce);
+}
+
+.c1{left:255px; top:245px;}
+.c2{left:255px; top:335px;}
+
+.smallAlarm{
+  position:absolute;
+  right:30px;
+  bottom:45px;
+  color:#fff;
+  font-size:46px;
+  font-weight:800;
+  transform:rotate(8deg);
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.smallAlarm svg{
+  width:26px;height:26px;
+}
+
+/* =========================================================
+   SWITCHER
+   ========================================================= */
+.switcher{
+  position:absolute;
+  left:50%;
+  bottom:10px;
+  transform:translateX(-50%);
+  display:flex;
+  gap:8px;
+  z-index:30;
+}
+
+.sw{
+  width:10px;height:10px;border-radius:50%;
+  background:#666;
+}
+.sw.active{background:#fff;}
+
+.hint{
+  position:absolute;
+  left:50%;
+  bottom:28px;
+  transform:translateX(-50%);
+  color:#666;
+  font-size:12px;
+  letter-spacing:.2em;
+}
+
+/* Responsive */
+@media (max-width:700px){
+  .city-time{font-size:92px;}
+}
+
+</style>
+</head>
+<body>
+
+<div id="watch">
+
+  <!-- =====================================================
+       FACE 1
+       ===================================================== -->
+  <section class="face active" id="face-map">
+
+    <div class="topbar">
+      <div class="status-left">
+        <div class="signal"></div>
+        <div id="miniClock1">18:04</div>
+      </div>
+      <div class="status-right" id="dots"></div>
+    </div>
+
+    <div class="world">
+      <div class="map-grid" id="mapGrid"></div>
+
+      <div class="curve">
+        <svg viewBox="0 0 430 524">
+          <path d="M15 58 C180 35, 190 65, 225 135
+                   C255 190, 255 410, 225 460
+                   C190 510, 90 500, 15 495"
+                fill="none"
+                stroke="rgba(255,255,255,.55)"
+                stroke-width="3"/>
+
+          <path d="M415 58 C255 35, 245 65, 210 135
+                   C180 190, 180 410, 210 460
+                   C245 510, 345 500, 415 495"
+                fill="none"
+                stroke="rgba(255,255,255,.55)"
+                stroke-width="3"/>
+        </svg>
+      </div>
+
+      <div class="orange-pin" style="left:330px; top:165px;"></div>
+
+      <div class="city-block">
+        <div class="city-name">서울</div>
+        <div class="city-time" id="cityTime">18:04</div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- =====================================================
+       FACE 2
+       ===================================================== -->
+  <section class="face" id="face-simple">
+    <div class="bigTime" id="bigTime">18:04</div>
+
+    <div class="rightInfo">
+      <div class="date" id="dateText">10일 (금)</div>
+      <div class="temp" id="tempText">10°C</div>
+    </div>
+
+    <div class="alarm">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="13" r="7"></circle>
+        <path d="M12 13V9M12 13l3 2"></path>
+        <path d="M5 4l2 2M19 4l-2 2"></path>
+      </svg>
+      <span>08:35</span>
+    </div>
+  </section>
+
+  <!-- =====================================================
+       FACE 3
+       ===================================================== -->
+  <section class="face" id="face-overlap">
+
+    <div class="overlapWrap">
+      <div class="num n1">1</div>
+      <div class="num n2">8</div>
+
+      <div class="colonBubble c1"></div>
+      <div class="colonBubble c2"></div>
+
+      <div class="num n3">0</div>
+      <div class="num n4">4</div>
+
+      <div class="smallAlarm">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ff3b30" stroke-width="2">
+          <circle cx="12" cy="13" r="7"></circle>
+          <path d="M12 13V9M12 13l3 2"></path>
+          <path d="M5 4l2 2M19 4l-2 2"></path>
+        </svg>
+        08:35
+      </div>
+    </div>
+
+  </section>
+
+  <!-- SWITCHER -->
+  <div class="hint">TAP</div>
+  <div class="switcher">
+    <div class="sw active"></div>
+    <div class="sw"></div>
+    <div class="sw"></div>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================
+   DATA / UTIL
+   ========================================================= */
+
+const faces = [...document.querySelectorAll('.face')];
+const sw = [...document.querySelectorAll('.sw')];
+let index = 0;
+
+function pad(n){ return String(n).padStart(2,'0'); }
+
+function updateClock(){
+  const now = new Date();
+
+  const hh = pad(now.getHours());
+  const mm = pad(now.getMinutes());
+  const txt = `${hh}:${mm}`;
+
+  const d = now.getDate();
+  const wd = ['일','월','화','수','목','금','토'][now.getDay()];
+
+  document.getElementById('miniClock1').textContent = txt;
+  document.getElementById('cityTime').textContent = txt;
+  document.getElementById('bigTime').textContent = txt;
+
+  document.getElementById('dateText').textContent =
+    `${d}일 (${wd})`;
+}
+
+setInterval(updateClock,1000);
+updateClock();
+
+/* =========================================================
+   SWITCH FACE
+   ========================================================= */
+function showFace(i){
+  faces.forEach((f,n)=>f.classList.toggle('active',n===i));
+  sw.forEach((s,n)=>s.classList.toggle('active',n===i));
+}
+
+document.getElementById('watch').addEventListener('click',()=>{
+  index=(index+1)%faces.length;
+  showFace(index);
+});
+
+/* Swipe support */
+let sx=0;
+watch.addEventListener('touchstart',e=>{
+  sx=e.touches[0].clientX;
+},{passive:true});
+
+watch.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-sx;
+  if(Math.abs(dx)>40){
+    if(dx<0) index=(index+1)%faces.length;
+    else index=(index-1+faces.length)%faces.length;
+    showFace(index);
+  }
+},{passive:true});
+
+/* =========================================================
+   MAP DOT WORLD (hand-crafted pixel world)
+   ========================================================= */
+
+const map = document.getElementById('mapGrid');
+
+const points = [
+/* North America */
+[40,60],[52,58],[64,56],[76,55],[88,54],[100,55],[112,58],
+[38,74],[50,74],[62,73],[74,72],[86,72],[98,73],[110,75],
+[45,88],[58,88],[71,88],[84,89],[97,90],[110,92],
+[58,103],[70,104],[82,106],[95,108],
+[72,120],[84,121],[96,123],
+[86,138],[100,138],
+
+/* South America */
+[116,164],[118,180],[122,196],[126,212],[132,228],[138,244],
+[145,260],[152,276],[156,292],[160,308],[166,324],[170,340],
+
+/* Europe */
+[214,84],[226,80],[238,76],[250,74],[262,72],[274,72],[286,74],[298,78],[310,84],
+[212,98],[224,98],[236,98],[248,98],[260,98],[272,98],[284,98],[296,98],[308,98],
+
+/* Africa */
+[230,140],[242,150],[252,162],[258,176],[262,190],[266,205],[270,220],[272,236],[276,252],[280,268],[286,284],[292,298],
+
+/* Asia */
+[274,110],[286,108],[298,106],[310,106],[322,108],[334,110],[346,112],[358,116],[370,120],
+[274,126],[286,126],[298,126],[310,126],[322,126],[334,126],[346,126],[358,126],
+[286,142],[298,142],[310,142],[322,142],[334,142],[346,142],[358,142],
+[304,158],[316,158],[328,158],[340,158],[352,158],
+[334,176],[346,176],[358,176],
+
+/* Australia */
+[346,256],[358,262],[370,268],[382,274],
+[350,278],[362,284],[374,290]
+];
+
+for(const [x,y] of points){
+  const d = document.createElement('div');
+  d.className='map-dot';
+  d.style.left=x+'px';
+  d.style.top=y+'px';
+  map.appendChild(d);
+}
+
+/* dimmed hidden continents dots */
+for(let i=0;i<90;i++){
+  const d=document.createElement('div');
+  d.className='map-dot dim';
+  d.style.left=(Math.random()*430)+'px';
+  d.style.top=(40+Math.random()*320)+'px';
+  map.appendChild(d);
+}
+
+/* top status dots */
+const dots=document.getElementById('dots');
+for(let i=0;i<14;i++){
+  const x=document.createElement('div');
+  x.className='dot';
+  x.style.opacity = i>11 ? .7 : .95;
+  dots.appendChild(x);
+}
+</script>
+</body>
+</html>
