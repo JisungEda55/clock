@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Apple Watch World Clock - Focused View</title>
+    <title>NEMO Watch World Clock</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/topojson-client@3"></script>
     <style>
@@ -23,9 +23,11 @@
         .widget-container {
             position: relative;
             width: 100%;
-            max-width: 1200px;
-            aspect-ratio: 2.5 / 1; /* 가로로 더 긴 비율로 조정 */
+            max-width: 1000px;
+            aspect-ratio: 2.2 / 1;
             background-color: #000;
+            border-radius: 20px;
+            overflow: hidden;
         }
 
         canvas {
@@ -34,36 +36,30 @@
             display: block;
         }
 
-        /* 왼쪽 텍스트 영역 */
         .info-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 50%; /* 화면의 절반 차지 */
-            height: 100%;
+            bottom: 30px;
+            left: 40px;
+            pointer-events: none;
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            padding-left: 60px;
-            pointer-events: none;
-            z-index: 10;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
         }
 
         .location-name {
-            color: #ff9f0a;
-            font-size: 1.5rem;
+            color: #00F918; /* Green */
+            font-size: 1.2rem;
             font-weight: 700;
-            margin-bottom: 5px;
+            margin-bottom: -5px;
             text-transform: uppercase;
-            letter-spacing: 1px;
         }
 
         .local-time {
-            font-size: 8rem; /* 더 크게 강조 */
+            font-size: 5.5rem;
             font-weight: 600;
-            letter-spacing: -4px;
+            letter-spacing: -2px;
             margin: 0;
-            line-height: 1;
+            line-height: 1.1;
         }
     </style>
 </head>
@@ -74,7 +70,7 @@
         
         <div class="info-overlay">
             <div class="location-name" id="loc-name">SEOUL</div>
-            <div class="local-time" id="loc-time">00:00</div>
+            <div class="local-time" id="loc-time">--:--</div>
         </div>
     </div>
 
@@ -82,141 +78,178 @@
         const canvas = document.getElementById('map-canvas');
         const ctx = canvas.getContext('2d');
         
-        // 캔버스 해상도 설정
-        const width = 1200;
-        const height = 480;
+        const width = 1000;
+        const height = 454;
         canvas.width = width;
         canvas.height = height;
 
-        // 지도를 오른쪽으로 밀기 위한 투영 설정
-        // rotate: [경도, 위도, 롤] -> 입력된 경도의 반대 방향으로 회전시켜 중심에 오게 함
-        let projection = d3.geoEquirectangular()
-            .translate([width * 0.75, height / 2]) // 지도의 중심축을 전체 화면의 75% 지점(오른쪽 중심)으로 이동
-            .scale(220)
-            .rotate([-126.9780, 0]); // 초기값 서울 중심
-
+        // D3 지도 투영법 설정 (Equirectangular가 점 패턴에 가장 적합)
+        const projection = d3.geoEquirectangular().translate([width / 2, height / 2]).scale(160);
         const path = d3.geoPath().projection(projection).context(ctx);
 
         let targetCity = { name: 'SEOUL', lon: 126.9780, lat: 37.5665 };
         let currentTimezone = 'Asia/Seoul';
-        let worldData = null;
+        let landDots = []; // 최적화된 육지 점 배열
 
-        // 1. 태양 위치 계산
+        // 1. 현재 태양의 위치(경도, 위도) 계산 (지구 공전 및 자전 반영)
         function getSunPosition(date) {
             const start = new Date(date.getUTCFullYear(), 0, 0);
             const diff = date - start;
             const dayOfYear = Math.floor(diff / 86400000);
+
+            // 적위(Declination) 계산: 위도 (계절 반영)
             const decDeg = -23.44 * Math.cos((360 / 365) * (dayOfYear + 10) * (Math.PI / 180));
-            const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60;
+            
+            // 직하점 경도(Subsolar Longitude) 계산: 시간 반영
+            const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
             let subsolarLon = 180 - (utcHours * 15);
             if (subsolarLon > 180) subsolarLon -= 360;
+            if (subsolarLon < -180) subsolarLon += 360;
+
             return { lon: subsolarLon, lat: decDeg };
         }
 
-        // 2. 동적 점 생성 (회전 반영)
-        function draw() {
-            if (!worldData) return;
-
-            const now = new Date();
-            const sunPos = getSunPosition(now);
-            const decRad = sunPos.lat * Math.PI / 180;
-            const subLonRad = sunPos.lon * Math.PI / 180;
-
-            ctx.clearRect(0, 0, width, height);
-
-            // 육지 영역에 대해서만 점 그리기
-            const landDots = [];
-            // 성능과 밀도를 위해 2.8도 간격으로 스캔
-            for(let lon = -180; lon <= 180; lon += 2.8) {
-                for(let lat = -80; lat <= 80; lat += 2.8) {
-                    if (d3.geoContains(worldData, [lon, lat])) {
-                        const p = projection([lon, lat]);
-                        // 화면 범위 내에 있는 점만 계산
-                        if (p && p[0] > width * 0.4) { 
-                            const latRad = lat * Math.PI / 180;
-                            const lonRad = lon * Math.PI / 180;
-                            const altitudeSin = Math.sin(latRad) * Math.sin(decRad) + 
-                                               Math.cos(latRad) * Math.cos(decRad) * Math.cos(lonRad - subLonRad);
-                            
-                            ctx.fillStyle = altitudeSin > 0 ? '#ffffff' : '#3a3a3c';
-                            ctx.beginPath();
-                            ctx.arc(p[0], p[1], 1.5, 0, Math.PI * 2);
-                            ctx.fill();
+        // 2. 맵 초기화 및 육지(Land) 위경도 점 미리 생성 (퍼포먼스 최적화)
+        function initMap() {
+            d3.json('https://unpkg.com/world-atlas@2.0.2/countries-110m.json').then(world => {
+                const landFeature = topojson.feature(world, world.objects.land);
+                
+                // 전 세계 2.5도 간격으로 점 스캔
+                for(let lon = -180; lon <= 180; lon += 2.5) {
+                    for(let lat = -85; lat <= 85; lat += 2.5) {
+                        // 점이 육지 안에 포함되는지 판별
+                        if (d3.geoContains(landFeature, [lon, lat])) {
+                            const projected = projection([lon, lat]);
+                            if (projected) {
+                                landDots.push({
+                                    lon: lon,
+                                    lat: lat,
+                                    latRad: lat * Math.PI / 180,
+                                    x: projected[0],
+                                    y: projected[1]
+                                });
+                            }
                         }
                     }
                 }
-            }
+                // 렌더링 루프 시작
+                requestAnimationFrame(draw);
+            }).catch(err => console.error("맵 데이터 로드 실패", err));
+        }
 
-            // 주야간 경계선
-            const terminator = d3.geoCircle().center([sunPos.lon, sunPos.lat]).radius(90)();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.lineWidth = 1;
+        // 3. 메인 렌더링 루프
+        function draw() {
+            const now = new Date();
+            const sunPos = getSunPosition(now);
+            
+            // 수학적 계산을 위한 태양 라디안 값
+            const decRad = sunPos.lat * Math.PI / 180;
+            const subLonRad = sunPos.lon * Math.PI / 180;
+            const sinDec = Math.sin(decRad);
+            const cosDec = Math.cos(decRad);
+
+            // 캔버스 초기화
+            ctx.clearRect(0, 0, width, height);
+
+            // A. 주야간 점(Dot) 렌더링
+            landDots.forEach(dot => {
+                const lonRad = dot.lon * Math.PI / 180;
+                const H = lonRad - subLonRad; // 시간각(Hour Angle)
+                
+                // 고도각(Altitude) 계산을 통해 주간/야간 판별
+                const altitudeSin = Math.sin(dot.latRad) * sinDec + Math.cos(dot.latRad) * cosDec * Math.cos(H);
+                const isDay = altitudeSin > 0;
+
+                ctx.fillStyle = isDay ? '#ffffff' : '#3a3a3c'; // 주간: 하얀점, 야간: 어두운 회색점
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // B. 주야간 경계선(Terminator Line) 렌더링
+            // D3의 geoCircle을 이용해 태양 위치를 중심으로 90도 반경의 폴리곤을 그려 경계선을 자연스럽게 추출합니다.
+            const terminatorCircle = d3.geoCircle().center([sunPos.lon, sunPos.lat]).radius(90)();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)'; // 부드러운 반투명 흰색 선
+            ctx.lineWidth = 1.5;
             ctx.beginPath();
-            path(terminator);
+            path(terminatorCircle);
             ctx.stroke();
 
-            // 대상 지역 오렌지 점
-            const targetP = projection([targetCity.lon, targetCity.lat]);
-            if (targetP) {
-                ctx.fillStyle = '#ff9f0a';
-                ctx.shadowColor = '#ff9f0a';
-                ctx.shadowBlur = 15;
+            // C. 강조 지역(Target City) 렌더링
+            const projectedPoint = projection([targetCity.lon, targetCity.lat]);
+            if (projectedPoint) {
+                ctx.fillStyle = '#00F918';
                 ctx.beginPath();
-                ctx.arc(targetP[0], targetP[1], 5, 0, Math.PI * 2);
+                ctx.arc(projectedPoint[0], projectedPoint[1], 4.5, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.shadowBlur = 0;
+
+                // 야간이어도 잘 보이도록 약간의 빛 효과 추가
+                ctx.shadowColor = '#00F918';
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.shadowBlur = 0; 
             }
 
             requestAnimationFrame(draw);
         }
 
-        // 3. 지역 정보 로드 및 지도 회전 업데이트
-        async function updateLocation() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const query = urlParams.get('location') || 'Seoul';
-
-            try {
-                const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`);
-                const data = await res.json();
-                
-                if (data && data[0]) {
-                    targetCity.lon = parseFloat(data[0].lon);
-                    targetCity.lat = parseFloat(data[0].lat);
-                    targetCity.name = query.toUpperCase();
-                    document.getElementById('loc-name').innerText = targetCity.name;
-
-                    // 핵심: 지도의 중심을 해당 지역 경도로 회전
-                    projection.rotate([-targetCity.lon, 0]);
-
-                    const tzRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${targetCity.lat}&longitude=${targetCity.lon}&current_weather=true&timezone=auto`);
-                    const tzData = await tzRes.json();
-                    currentTimezone = tzData.timezone || 'UTC';
-                }
-            } catch (e) {
-                console.error("Location error", e);
-            }
-        }
-
+        // 4. 시간 표시 업데이트 (해당 지역의 Timezone 반영)
         function updateClock() {
             const now = new Date();
-            const timeString = new Intl.DateTimeFormat('en-GB', {
-                timeZone: currentTimezone,
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            }).format(now);
-            document.getElementById('loc-time').innerText = timeString;
+            const options = { 
+                timeZone: currentTimezone, 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                hour12: false 
+            };
+            try {
+                const timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
+                document.getElementById('loc-time').innerText = timeString;
+            } catch(e) {
+                // 타임존 오류 시 로컬 시간 폴백
+                const fallbackTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                document.getElementById('loc-time').innerText = fallbackTime;
+            }
+        }
+        setInterval(updateClock, 1000);
+
+        // 5. URL 쿼리 분석 및 API를 통한 지역/타임존 연동
+        async function setupLocation() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryLoc = urlParams.get('location');
+
+            if (queryLoc) {
+                targetCity.name = decodeURIComponent(queryLoc).toUpperCase();
+                document.getElementById('loc-name').innerText = targetCity.name;
+                
+                try {
+                    // Nominatim을 통해 위경도 파악
+                    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryLoc)}&format=json&limit=1`);
+                    const geoData = await geoRes.json();
+                    
+                    if (geoData && geoData.length > 0) {
+                        targetCity.lon = parseFloat(geoData[0].lon);
+                        targetCity.lat = parseFloat(geoData[0].lat);
+
+                        // Open-Meteo API를 통해 해당 위경도의 정확한 Timezone 획득 (무료 API)
+                        const tzRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${targetCity.lat}&longitude=${targetCity.lon}&current_weather=true&timezone=auto`);
+                        const tzData = await tzRes.json();
+                        if (tzData.timezone) {
+                            currentTimezone = tzData.timezone;
+                        }
+                    }
+                } catch (err) {
+                    console.error("위치 또는 타임존 정보를 불러오는 데 실패했습니다.", err);
+                }
+            } else {
+                document.getElementById('loc-name').innerText = targetCity.name;
+            }
+            updateClock();
         }
 
-        // 초기화
-        d3.json('https://unpkg.com/world-atlas@2.0.2/countries-110m.json').then(data => {
-            worldData = topojson.feature(data, data.objects.land);
-            updateLocation().then(() => {
-                setInterval(updateClock, 1000);
-                updateClock();
-                requestAnimationFrame(draw);
-            });
-        });
+        // 실행
+        setupLocation().then(initMap);
+
     </script>
 </body>
 </html>
