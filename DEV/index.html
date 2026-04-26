@@ -70,7 +70,7 @@
         
         <div class="info-overlay" id="info-overlay">
             <div class="location-name" id="loc-name">SEOUL</div>
-            <div class="local-time" id="loc-time">--:--</div>
+            <div class="local-time" id="loc-time">--:--:--</div>
         </div>
     </div>
 
@@ -87,14 +87,14 @@
         let currentTimezone = 'Asia/Seoul';
         let landDots = [];
 
-        // DEV 모드 설정 (기본: 실제 시간)
-        let timeSpeed = 1;        // 1 = 실제 시간, DEV 모드에서는 288 (24시간 = 5분)
+        // DEV 모드 설정
+        let timeSpeed = 1;        // 1 = 실제 시간, DEV = 288배속 (24시간 = 5분)
         let simulationStartTime = Date.now();
         let realStartTime = Date.now();
 
-        // NEMO 모드 (중앙 정렬)
+        // NEMO 모드
         let isNemoMode = false;
-        let nemoScale = 160;
+        let nemoScale = 220;
         let nemoTranslateX = width / 2;
         let nemoTranslateY = height / 2;
 
@@ -105,12 +105,12 @@
         // 현재 시뮬레이션 시간 반환
         function getSimulationTime() {
             if (timeSpeed === 1) return new Date();
-            const elapsedReal = (Date.now() - realStartTime) / 1000; // 초 단위
+            const elapsedReal = (Date.now() - realStartTime) / 1000;
             const simulatedMs = elapsedReal * timeSpeed * 1000;
             return new Date(simulationStartTime + simulatedMs);
         }
 
-        // 태양 위치 계산 (시뮬레이션 시간 사용)
+        // 태양 위치 계산
         function getSunPosition(date) {
             const start = new Date(date.getUTCFullYear(), 0, 0);
             const diff = date - start;
@@ -152,7 +152,7 @@
             }).catch(err => console.error("맵 데이터 로드 실패", err));
         }
 
-        // 메인 드로우 루프
+        // 메인 드로우 루프 (지도)
         function draw() {
             const now = getSimulationTime();
             const sunPos = getSunPosition(now);
@@ -164,7 +164,6 @@
 
             ctx.clearRect(0, 0, width, height);
 
-            // 주야간 점 렌더링
             landDots.forEach(dot => {
                 const lonRad = dot.lon * Math.PI / 180;
                 const H = lonRad - subLonRad;
@@ -177,7 +176,6 @@
                 ctx.fill();
             });
 
-            // 주야간 경계선
             const terminatorCircle = d3.geoCircle().center([sunPos.lon, sunPos.lat]).radius(90)();
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
             ctx.lineWidth = 1.5;
@@ -185,7 +183,6 @@
             path(terminatorCircle);
             ctx.stroke();
 
-            // 타겟 도시 강조
             const projectedPoint = projection([targetCity.lon, targetCity.lat]);
             if (projectedPoint) {
                 ctx.fillStyle = '#00F918';
@@ -200,21 +197,24 @@
             requestAnimationFrame(draw);
         }
 
-        // 시계 업데이트 (시뮬레이션 시간 사용)
+        // 부드러운 시간 업데이트 (0.1초마다, 초 단위 표시)
         function updateClock() {
             const now = getSimulationTime();
             const options = { 
                 timeZone: currentTimezone, 
                 hour: '2-digit', 
-                minute: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit',
                 hour12: false 
             };
             try {
                 const timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
                 document.getElementById('loc-time').innerText = timeString;
             } catch(e) {
-                const fallbackTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                document.getElementById('loc-time').innerText = fallbackTime;
+                const h = now.getHours().toString().padStart(2, '0');
+                const m = now.getMinutes().toString().padStart(2, '0');
+                const s = now.getSeconds().toString().padStart(2, '0');
+                document.getElementById('loc-time').innerText = `${h}:${m}:${s}`;
             }
         }
 
@@ -226,27 +226,24 @@
             const isNoTime = urlParams.has('notime') || urlParams.has('noTime');
             const isNemo = urlParams.has('NEMO') || urlParams.has('nemo');
 
-            // DEV 모드
             if (isDev) {
-                timeSpeed = 288; // 24시간 = 5분 (24*60 / 5 = 288배속)
+                timeSpeed = 288;
                 console.log('%c🚀 DEV 모드 활성화: 24시간 = 5분 빠른 시뮬레이션', 'color:#00F918; font-weight:bold');
             }
 
-            // notime 모드
             if (isNoTime) {
                 document.getElementById('info-overlay').style.display = 'none';
                 console.log('%c⏰ 시간/지명 표시 OFF', 'color:#888');
             }
 
-            // NEMO 모드 (중앙 정렬)
             if (isNemo) {
                 isNemoMode = true;
-                nemoScale = 220; // 조금 더 확대
+                nemoScale = 220;
                 console.log('%c🌍 NEMO 모드: 도시 중앙 정렬', 'color:#00F918; font-weight:bold');
             }
 
             if (queryLoc) {
-                targetCity.name = decodeURIComponent(queryLoc.split('?')[0]).toUpperCase(); // ?DEV 등 제거
+                targetCity.name = decodeURIComponent(queryLoc.split('?')[0]).toUpperCase();
                 document.getElementById('loc-name').innerText = targetCity.name;
                 
                 try {
@@ -268,17 +265,17 @@
                 document.getElementById('loc-name').innerText = targetCity.name;
             }
 
-            // NEMO 모드일 경우 투영 재설정 (도시를 중앙에 배치)
             if (isNemoMode) {
                 projection = projectionBase
                     .translate([nemoTranslateX, nemoTranslateY])
                     .scale(nemoScale)
-                    .center([targetCity.lon, targetCity.lat]); // 중심을 도시로 설정
+                    .center([targetCity.lon, targetCity.lat]);
                 path = d3.geoPath().projection(projection).context(ctx);
             }
 
+            // 부드러운 시간 업데이트 시작 (0.1초 간격)
             updateClock();
-            setInterval(updateClock, 1000); // 1초마다 업데이트 (시뮬레이션 시간 반영)
+            setInterval(updateClock, 100);
         }
 
         // 실행
