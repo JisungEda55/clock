@@ -47,11 +47,21 @@
         }
 
         .location-name {
-            color: #00F918; /* Green */
+            color: #00F918;
             font-size: 1.2rem;
             font-weight: 700;
-            margin-bottom: -5px;
+            margin-bottom: 2px;
             text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .weather-info {
+            font-size: 1.1rem;
+            color: #00F9E0;
+            font-weight: 500;
+            white-space: nowrap;
         }
 
         .local-time {
@@ -60,6 +70,7 @@
             letter-spacing: -2px;
             margin: 0;
             line-height: 1.1;
+            transition: opacity 0.4s ease-in-out;
         }
     </style>
 </head>
@@ -68,8 +79,8 @@
     <div class="widget-container">
         <canvas id="map-canvas"></canvas>
         
-        <div class="info-overlay">
-            <div class="location-name" id="loc-name">SEOUL</div>
+        <div class="info-overlay" id="info-overlay">
+            <div class="location-name" id="loc-name">SEOUL <span class="weather-info" id="weather-info">⛅ --°C</span></div>
             <div class="local-time" id="loc-time">--:--</div>
         </div>
     </div>
@@ -83,24 +94,34 @@
         canvas.width = width;
         canvas.height = height;
 
-        // D3 지도 투영법 설정 (Equirectangular가 점 패턴에 가장 적합)
-        const projection = d3.geoEquirectangular().translate([width / 2, height / 2]).scale(160);
-        const path = d3.geoPath().projection(projection).context(ctx);
-
         let targetCity = { name: 'SEOUL', lon: 126.9780, lat: 37.5665 };
         let currentTimezone = 'Asia/Seoul';
-        let landDots = []; // 최적화된 육지 점 배열
+        let landDots = [];
 
-        // 1. 현재 태양의 위치(경도, 위도) 계산 (지구 공전 및 자전 반영)
+        let timeSpeed = 1;
+        let simulationStartTime = Date.now();
+        let realStartTime = Date.now();
+
+        let isNemoMode = false;
+        let nemoScale = 220;
+
+        const projectionBase = d3.geoEquirectangular();
+        let projection = projectionBase.translate([width / 2, height / 2]).scale(160);
+        let path = d3.geoPath().projection(projection).context(ctx);
+
+        function getSimulationTime() {
+            if (timeSpeed === 1) return new Date();
+            const elapsedReal = (Date.now() - realStartTime) / 1000;
+            const simulatedMs = elapsedReal * timeSpeed * 1000;
+            return new Date(simulationStartTime + simulatedMs);
+        }
+
         function getSunPosition(date) {
             const start = new Date(date.getUTCFullYear(), 0, 0);
             const diff = date - start;
             const dayOfYear = Math.floor(diff / 86400000);
-
-            // 적위(Declination) 계산: 위도 (계절 반영)
             const decDeg = -23.44 * Math.cos((360 / 365) * (dayOfYear + 10) * (Math.PI / 180));
             
-            // 직하점 경도(Subsolar Longitude) 계산: 시간 반영
             const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
             let subsolarLon = 180 - (utcHours * 15);
             if (subsolarLon > 180) subsolarLon -= 360;
@@ -109,147 +130,172 @@
             return { lon: subsolarLon, lat: decDeg };
         }
 
-        // 2. 맵 초기화 및 육지(Land) 위경도 점 미리 생성 (퍼포먼스 최적화)
         function initMap() {
             d3.json('https://unpkg.com/world-atlas@2.0.2/countries-110m.json').then(world => {
                 const landFeature = topojson.feature(world, world.objects.land);
-                
-                // 전 세계 2.5도 간격으로 점 스캔
+                landDots = [];
                 for(let lon = -180; lon <= 180; lon += 2.5) {
                     for(let lat = -85; lat <= 85; lat += 2.5) {
-                        // 점이 육지 안에 포함되는지 판별
                         if (d3.geoContains(landFeature, [lon, lat])) {
                             const projected = projection([lon, lat]);
                             if (projected) {
-                                landDots.push({
-                                    lon: lon,
-                                    lat: lat,
-                                    latRad: lat * Math.PI / 180,
-                                    x: projected[0],
-                                    y: projected[1]
-                                });
+                                landDots.push({ lon, lat, latRad: lat * Math.PI / 180, x: projected[0], y: projected[1] });
                             }
                         }
                     }
                 }
-                // 렌더링 루프 시작
                 requestAnimationFrame(draw);
             }).catch(err => console.error("맵 데이터 로드 실패", err));
         }
 
-        // 3. 메인 렌더링 루프
         function draw() {
-            const now = new Date();
+            const now = getSimulationTime();
             const sunPos = getSunPosition(now);
-            
-            // 수학적 계산을 위한 태양 라디안 값
             const decRad = sunPos.lat * Math.PI / 180;
             const subLonRad = sunPos.lon * Math.PI / 180;
             const sinDec = Math.sin(decRad);
             const cosDec = Math.cos(decRad);
 
-            // 캔버스 초기화
             ctx.clearRect(0, 0, width, height);
 
-            // A. 주야간 점(Dot) 렌더링
             landDots.forEach(dot => {
                 const lonRad = dot.lon * Math.PI / 180;
-                const H = lonRad - subLonRad; // 시간각(Hour Angle)
-                
-                // 고도각(Altitude) 계산을 통해 주간/야간 판별
+                const H = lonRad - subLonRad;
                 const altitudeSin = Math.sin(dot.latRad) * sinDec + Math.cos(dot.latRad) * cosDec * Math.cos(H);
                 const isDay = altitudeSin > 0;
-
-                ctx.fillStyle = isDay ? '#ffffff' : '#3a3a3c'; // 주간: 하얀점, 야간: 어두운 회색점
+                ctx.fillStyle = isDay ? '#ffffff' : '#3a3a3c';
                 ctx.beginPath();
                 ctx.arc(dot.x, dot.y, 1.5, 0, Math.PI * 2);
                 ctx.fill();
             });
 
-            // B. 주야간 경계선(Terminator Line) 렌더링
-            // D3의 geoCircle을 이용해 태양 위치를 중심으로 90도 반경의 폴리곤을 그려 경계선을 자연스럽게 추출합니다.
             const terminatorCircle = d3.geoCircle().center([sunPos.lon, sunPos.lat]).radius(90)();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)'; // 부드러운 반투명 흰색 선
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             path(terminatorCircle);
             ctx.stroke();
 
-            // C. 강조 지역(Target City) 렌더링
             const projectedPoint = projection([targetCity.lon, targetCity.lat]);
             if (projectedPoint) {
                 ctx.fillStyle = '#00F918';
-                ctx.beginPath();
-                ctx.arc(projectedPoint[0], projectedPoint[1], 4.5, 0, Math.PI * 2);
-                ctx.fill();
-
-                // 야간이어도 잘 보이도록 약간의 빛 효과 추가
                 ctx.shadowColor = '#00F918';
-                ctx.shadowBlur = 10;
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(projectedPoint[0], projectedPoint[1], 5, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.shadowBlur = 0; 
+                ctx.shadowBlur = 0;
             }
 
             requestAnimationFrame(draw);
         }
 
-        // 4. 시간 표시 업데이트 (해당 지역의 Timezone 반영)
+        // 부드러운 시간 업데이트 (HH:MM)
+        let lastDisplayedTime = '';
         function updateClock() {
-            const now = new Date();
-            const options = { 
-                timeZone: currentTimezone, 
-                hour: '2-digit', 
-                minute: '2-digit', 
-                hour12: false 
-            };
+            const now = getSimulationTime();
+            const options = { timeZone: currentTimezone, hour: '2-digit', minute: '2-digit', hour12: false };
+            let timeString;
             try {
-                const timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
-                document.getElementById('loc-time').innerText = timeString;
+                timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
             } catch(e) {
-                // 타임존 오류 시 로컬 시간 폴백
-                const fallbackTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                document.getElementById('loc-time').innerText = fallbackTime;
+                const h = now.getHours().toString().padStart(2, '0');
+                const m = now.getMinutes().toString().padStart(2, '0');
+                timeString = `${h}:${m}`;
+            }
+
+            if (timeString !== lastDisplayedTime) {
+                const timeEl = document.getElementById('loc-time');
+                timeEl.style.opacity = '0';
+                setTimeout(() => {
+                    timeEl.innerText = timeString;
+                    timeEl.style.opacity = '1';
+                }, 200);
+                lastDisplayedTime = timeString;
             }
         }
-        setInterval(updateClock, 1000);
 
-        // 5. URL 쿼리 분석 및 API를 통한 지역/타임존 연동
+        // wttr.in으로 날씨 가져오기 (간단하고 예쁜 형식)
+        async function updateWeather() {
+            const weatherEl = document.getElementById('weather-info');
+            const city = targetCity.name.toLowerCase().replace(/ /g, '+');
+
+            try {
+                // format=1 : 이모지 + 온도 (가장 깔끔함)
+                const res = await fetch(`https://wttr.in/${city}?format=1&lang=ko`);
+                const text = await res.text();
+                weatherEl.innerText = text.trim();
+            } catch (err) {
+                console.error("날씨 정보를 가져오지 못했습니다.", err);
+                weatherEl.innerText = "⛅ --°C";
+            }
+        }
+
+        // URL 파라미터 처리
         async function setupLocation() {
             const urlParams = new URLSearchParams(window.location.search);
             const queryLoc = urlParams.get('location');
+            const isDev = urlParams.has('DEV') || urlParams.has('dev');
+            const isNoTime = urlParams.has('notime') || urlParams.has('noTime');
+            const isNemo = urlParams.has('NEMO') || urlParams.has('nemo');
+
+            if (isDev) {
+                timeSpeed = 288;
+                console.log('%c🚀 DEV 모드 활성화: 24시간 = 5분 빠른 시뮬레이션', 'color:#00F918; font-weight:bold');
+            }
+
+            if (isNoTime) {
+                document.getElementById('loc-time').style.display = 'none';
+                console.log('%c⏰ 시간 표시 OFF (날씨는 유지)', 'color:#888');
+            }
+
+            if (isNemo) {
+                isNemoMode = true;
+                nemoScale = 220;
+                console.log('%c🌍 NEMO 모드: 도시 중앙 정렬', 'color:#00F918; font-weight:bold');
+            }
 
             if (queryLoc) {
-                targetCity.name = decodeURIComponent(queryLoc).toUpperCase();
-                document.getElementById('loc-name').innerText = targetCity.name;
-                
+                targetCity.name = decodeURIComponent(queryLoc.split('?')[0]).toUpperCase();
+                document.getElementById('loc-name').childNodes[0].nodeValue = targetCity.name + " "; // 도시 이름 업데이트
+            } else {
+                document.getElementById('loc-name').childNodes[0].nodeValue = targetCity.name + " ";
+            }
+
+            // 위치 기반 타임존 및 좌표 업데이트
+            if (queryLoc) {
                 try {
-                    // Nominatim을 통해 위경도 파악
                     const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryLoc)}&format=json&limit=1`);
                     const geoData = await geoRes.json();
-                    
                     if (geoData && geoData.length > 0) {
                         targetCity.lon = parseFloat(geoData[0].lon);
                         targetCity.lat = parseFloat(geoData[0].lat);
 
-                        // Open-Meteo API를 통해 해당 위경도의 정확한 Timezone 획득 (무료 API)
                         const tzRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${targetCity.lat}&longitude=${targetCity.lon}&current_weather=true&timezone=auto`);
                         const tzData = await tzRes.json();
-                        if (tzData.timezone) {
-                            currentTimezone = tzData.timezone;
-                        }
+                        if (tzData.timezone) currentTimezone = tzData.timezone;
                     }
                 } catch (err) {
-                    console.error("위치 또는 타임존 정보를 불러오는 데 실패했습니다.", err);
+                    console.error("위치 정보를 불러오는 데 실패했습니다.", err);
                 }
-            } else {
-                document.getElementById('loc-name').innerText = targetCity.name;
             }
+
+            if (isNemoMode) {
+                projection = projectionBase.translate([width/2, height/2]).scale(nemoScale).center([targetCity.lon, targetCity.lat]);
+                path = d3.geoPath().projection(projection).context(ctx);
+            }
+
+            // 초기 실행
             updateClock();
+            updateWeather();
+
+            // 주기적 업데이트
+            setInterval(updateClock, 100);
+            setInterval(updateWeather, 600000); // 10분마다 날씨 갱신
         }
 
         // 실행
         setupLocation().then(initMap);
-
     </script>
 </body>
 </html>
