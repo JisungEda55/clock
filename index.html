@@ -3,354 +3,267 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Clock - Sun Position</title>
+    <title>World Clock Map Widget</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
-        
         body {
             margin: 0;
             padding: 0;
-            background: #000;
+            background-color: #000;
             color: #fff;
-            font-family: 'Noto Sans KR', sans-serif;
-            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
+            overflow: hidden;
+        }
+
+        .widget-container {
             position: relative;
+            width: 100%;
+            max-width: 900px;
+            aspect-ratio: 2 / 1;
+            background-color: #000;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+            overflow: hidden;
         }
 
         canvas {
+            width: 100%;
+            height: 100%;
             display: block;
-            max-width: 100%;
-            max-height: 100%;
         }
 
-        .info {
+        .info-overlay {
             position: absolute;
-            left: 40px;
-            bottom: 40px;
-            z-index: 10;
+            bottom: 25px;
+            left: 30px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
         }
 
-        .city {
-            color: #ff9500;
-            font-size: 18px;
-            margin-bottom: 5px;
+        .location-name {
+            color: #ff9f0a; /* 강조용 주황색 */
+            font-size: 1.1rem;
             font-weight: 700;
+            margin-bottom: -5px;
         }
 
-        .time {
-            font-size: 72px;
-            font-weight: 700;
-            line-height: 1;
+        .local-time {
+            font-size: 4.5rem;
+            font-weight: 500;
             letter-spacing: -2px;
-        }
-
-        .utc {
-            position: absolute;
-            top: 40px;
-            left: 40px;
-            font-size: 18px;
-            color: #aaa;
-            z-index: 10;
-        }
-
-        .title {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 22px;
-            color: #666;
-            z-index: 10;
-            letter-spacing: 4px;
+            margin: 0;
         }
     </style>
 </head>
 <body>
-    <div class="title">WORLD SUN CLOCK</div>
-    <div class="utc" id="utc">UTC 18:04</div>
-    
-    <canvas id="canvas" width="1200" height="600"></canvas>
 
-    <div class="info">
-        <div class="city" id="cityName">서울</div>
-        <div class="time" id="localTime">18:04</div>
+    <div class="widget-container">
+        <canvas id="map-canvas"></canvas>
+        
+        <div class="info-overlay">
+            <div class="location-name" id="loc-name">SEOUL</div>
+            <div class="local-time" id="loc-time">00:00</div>
+        </div>
     </div>
 
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        const canvas = document.getElementById('map-canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
         
-        let width = 1200;
-        let height = 600;
+        // 캔버스 내부 해상도 설정 (비율 2:1)
+        const width = 900;
+        const height = 450;
+        canvas.width = width;
+        canvas.height = height;
+
+        // D3 지도 투영법 설정
+        const projection = d3.geoEquirectangular().translate([width / 2, height / 2]).scale(140);
+        const path = d3.geoPath().projection(projection).context(ctx);
+
         let dots = [];
-        let sunLine = [];
-        
-        // 주요 도시 좌표 (경도, 위도) - 실제 지도에 맞게 조정
-        const cities = {
-            'SEOUL': { lon: 126.978, lat: 37.566, name: '서울', ko: '서울' },
-            'TOKYO': { lon: 139.650, lat: 35.676, name: 'Tokyo', ko: '도쿄' },
-            'NEWYORK': { lon: -74.006, lat: 40.712, name: 'New York', ko: '뉴욕' },
-            'LONDON': { lon: -0.127, lat: 51.507, name: 'London', ko: '런던' },
-            'PARIS': { lon: 2.352, lat: 48.856, name: 'Paris', ko: '파리' },
-            'SYDNEY': { lon: 151.209, lat: -33.868, name: 'Sydney', ko: '시드니' },
-            'LOSANGELES': { lon: -118.243, lat: 34.052, name: 'Los Angeles', ko: '로스앤젤레스' },
-            'MOSCOW': { lon: 37.617, lat: 55.755, name: 'Moscow', ko: '모스크바' },
-            'BEIJING': { lon: 116.407, lat: 39.904, name: 'Beijing', ko: '베이징' },
-            'DUBAI': { lon: 55.270, lat: 25.204, name: 'Dubai', ko: '두바이' }
-        };
+        let targetCity = { name: 'SEOUL', lon: 126.9780, lat: 37.5665 }; // 기본값
 
-        // 점 생성 (세계지도 형태)
-        function generateDots() {
-            dots = [];
-            const dotDensity = 1.8; // 점 밀도
+        // 1. URL Parameter 파싱 및 Geocoding API 호출
+        function fetchLocation() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryLoc = urlParams.get('location');
             
-            // 경도 -180 ~ 180, 위도 -90 ~ 90
-            for (let lon = -180; lon <= 180; lon += 3.5) {
-                for (let lat = -85; lat <= 85; lat += 3.5) {
-                    // 실제 대륙 모양을 근사적으로 표현 (간단한 필터)
-                    if (Math.random() > 0.35) continue; // 랜덤하게 점 생성
-                    
-                    // 바다/육지 근사 (간단한 조건)
-                    let isLand = true;
-                    if (lat < -60 || lat > 75) isLand = false; // 극지방
-                    
-                    // 간단한 대륙 필터
-                    if (lon > -30 && lon < 50 && lat > 10 && lat < 70) isLand = true; // 유럽/아프리카/아시아
-                    if (lon > -130 && lon < -60 && lat > 10 && lat < 60) isLand = true; // 북미
-                    if (lon > -80 && lon < -30 && lat > -60 && lat < 15) isLand = true; // 남미
-                    
-                    if (!isLand && Math.random() > 0.6) continue;
-                    
-                    const x = (lon + 180) / 360 * width;
-                    const y = (90 - lat) / 180 * height;
-                    
-                    dots.push({
-                        x: x,
-                        y: y,
-                        lon: lon,
-                        lat: lat,
-                        baseAlpha: Math.random() * 0.4 + 0.6
-                    });
-                }
+            if (queryLoc) {
+                document.getElementById('loc-name').innerText = decodeURIComponent(queryLoc).toUpperCase();
+                
+                // Nominatim API를 통한 좌표 검색
+                fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryLoc)}&format=json&limit=1`, {
+                    headers: { 'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7' }
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        targetCity.lon = parseFloat(data[0].lon);
+                        targetCity.lat = parseFloat(data[0].lat);
+                        targetCity.name = decodeURIComponent(queryLoc).toUpperCase();
+                    }
+                })
+                .catch(err => console.error("위치 정보를 가져오는데 실패했습니다.", err));
+            } else {
+                document.getElementById('loc-name').innerText = targetCity.name;
             }
         }
 
-        // 태양 위치 계산 (현재 시간 기준)
-        function getSunPosition() {
-            const now = new Date();
-            const utcHours = now.getUTCHours() + now.getUTCMinutes()/60 + now.getUTCSeconds()/3600;
-            
-            // 태양 직하점 경도 (지구 자전 기준)
-            // 15도/시간, 자정(0시)에 180도 (태평양 중앙)
-            const solarLongitude = (180 - (utcHours * 15)) % 360;
-            if (solarLongitude < -180) solarLongitude += 360;
-            
-            return {
-                lon: solarLongitude,
-                utcHours: utcHours
-            };
-        }
+        // 2. 세계 지도 데이터를 불러와서 점(Dot) 배열로 변환
+        function initMap() {
+            // TopoJSON 데이터 로드 (국가 형태 맵)
+            d3.json('https://unpkg.com/world-atlas@2.0.2/countries-110m.json').then(world => {
+                const geojsonData = topojson.feature(world, world.objects.countries);
 
-        // 점이 낮(태양이 떠있는지) 판단
-        function isDaytime(dot, sunLon) {
-            let diff = dot.lon - sunLon;
-            if (diff > 180) diff -= 360;
-            if (diff < -180) diff += 360;
-            
-            // ±90도 이내 = 낮 (태양이 떠 있음)
-            return Math.abs(diff) <= 90;
-        }
+                // 화면에 보이지 않는 임시 캔버스에 지도를 그려서 육지 영역 픽셀을 추출
+                const hiddenCanvas = document.createElement('canvas');
+                hiddenCanvas.width = width;
+                hiddenCanvas.height = height;
+                const hCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
+                
+                const hiddenPath = d3.geoPath().projection(projection).context(hCtx);
+                hCtx.fillStyle = 'white';
+                hCtx.beginPath();
+                hiddenPath(geojsonData);
+                hCtx.fill();
 
-        // 태양 경계선 계산
-        function calculateSunLine(sunLon) {
-            sunLine = [];
-            const steps = 180;
-            
-            for (let i = 0; i <= steps; i++) {
-                const t = i / steps;
-                const lat = 90 - t * 180; // 위도 -90 ~ 90
-                
-                // 경계선 경도 계산 (대략적인 terminator line)
-                const terminatorLon = (sunLon + (lat > 0 ? 10 : -5) * Math.sin(t * Math.PI)) % 360;
-                
-                const x = (terminatorLon + 180) / 360 * width;
-                const y = (90 - lat) / 180 * height;
-                
-                sunLine.push({x, y});
-            }
-        }
+                const imgData = hCtx.getImageData(0, 0, width, height).data;
+                const dotSpacing = 7; // 점 간격
+                const dotRadius = 1.5; // 점 크기
 
-        // 도시 강조 점 찾기
-        function findHighlightDot(location) {
-            if (!location || !cities[location]) return null;
-            
-            const city = cities[location];
-            let closest = null;
-            let minDist = Infinity;
-            
-            dots.forEach(dot => {
-                const dist = Math.hypot(dot.lon - city.lon, dot.lat - city.lat);
-                if (dist < minDist) {
-                    minDist = dist;
-                    closest = dot;
+                // 일정한 간격으로 픽셀을 스캔하며 육지(흰색)인 곳에 점 좌표 기록
+                for (let y = 0; y < height; y += dotSpacing) {
+                    for (let x = 0; x < width; x += dotSpacing) {
+                        const index = (y * width + x) * 4;
+                        if (imgData[index + 3] > 128) { 
+                            const lonLat = projection.invert([x, y]);
+                            if (lonLat) {
+                                dots.push({ 
+                                    x: x + dotSpacing / 2, 
+                                    y: y + dotSpacing / 2, 
+                                    lon: lonLat[0], 
+                                    lat: lonLat[1] 
+                                });
+                            }
+                        }
+                    }
                 }
+                
+                // 렌더링 루프 시작
+                requestAnimationFrame(draw);
             });
-            
-            return closest;
         }
 
-        // 그리기
+        // 3. 태양의 적위 및 직하점(Subsolar Point) 계산
+        function getSolarPosition(date) {
+            const start = new Date(date.getUTCFullYear(), 0, 0);
+            const diff = date - start;
+            const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+            // 태양 적위 근사치 계산 (-23.44도 ~ 23.44도)
+            const decDeg = -23.44 * Math.cos((360 / 365) * (dayOfYear + 10) * (Math.PI / 180));
+            const decRad = decDeg * (Math.PI / 180);
+
+            // UTC 기반 직하점 경도 계산
+            const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+            const subsolarLon = 180 - (utcHours * 15);
+
+            return { decRad, subsolarLon };
+        }
+
+        // 특정 좌표가 주간인지 야간인지 고도 계산으로 판별
+        function isDaylight(lon, lat, decRad, subsolarLon) {
+            const latRad = lat * (Math.PI / 180);
+            let hourAngleDeg = (lon - subsolarLon % 360 + 540) % 360 - 180;
+            const hourAngleRad = hourAngleDeg * (Math.PI / 180);
+
+            const sinH = Math.sin(latRad) * Math.sin(decRad) +
+                         Math.cos(latRad) * Math.cos(decRad) * Math.cos(hourAngleRad);
+            return sinH > 0;
+        }
+
+        // 4. 메인 렌더링 루프
+        let lastMinute = -1;
         function draw() {
+            const now = new Date();
+            
+            // 시간 표시 업데이트 (분이 바뀔 때만)
+            if (now.getMinutes() !== lastMinute) {
+                document.getElementById('loc-time').innerText = 
+                    now.getHours().toString().padStart(2, '0') + ':' + 
+                    now.getMinutes().toString().padStart(2, '0');
+                lastMinute = now.getMinutes();
+            }
+
+            const { decRad, subsolarLon } = getSolarPosition(now);
+
+            // 화면 초기화
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, width, height);
-            
-            const sunInfo = getSunPosition();
-            const sunLon = sunInfo.lon;
-            
-            calculateSunLine(sunLon);
-            
-            // 점 그리기
-            ctx.shadowBlur = 0;
-            
+
+            // 1) 점 그리기
+            ctx.beginPath();
             dots.forEach(dot => {
-                const isDay = isDaytime(dot, sunLon);
-                
-                if (isDay) {
-                    ctx.fillStyle = `rgba(255, 255, 255, ${dot.baseAlpha})`;
-                } else {
-                    ctx.fillStyle = `rgba(120, 120, 140, ${dot.baseAlpha * 0.75})`;
-                }
-                
-                ctx.beginPath();
-                ctx.arc(dot.x, dot.y, 1.8, 0, Math.PI * 2);
-                ctx.fill();
+                const isDay = isDaylight(dot.lon, dot.lat, decRad, subsolarLon);
+                ctx.fillStyle = isDay ? '#ffffff' : '#3a3a3c'; // 주간은 흰색, 야간은 짙은 회색
+                ctx.moveTo(dot.x, dot.y);
+                ctx.arc(dot.x, dot.y, 1.2, 0, Math.PI * 2);
             });
-            
-            // 태양 경계선 (부드러운 그라데이션 선)
-            if (sunLine.length > 1) {
-                ctx.strokeStyle = 'rgba(255, 220, 100, 0.9)';
-                ctx.lineWidth = 4.5;
-                ctx.shadowColor = '#ffeb3b';
-                ctx.shadowBlur = 25;
+            ctx.fill();
+
+            // 2) 경계선(Terminator Line) 그리기
+            // 수학적으로 고도가 0이 되는 위도(lat)를 각 경도(lon)마다 계산하여 LineString 생성
+            let safeDecRad = decRad;
+            if (Math.abs(safeDecRad) < 0.0001) safeDecRad = safeDecRad < 0 ? -0.0001 : 0.0001; // 분모 0 방지
+
+            const terminatorCoords = [];
+            for (let lon = -180; lon <= 180; lon += 2) {
+                let hourAngleDeg = (lon - subsolarLon % 360 + 540) % 360 - 180;
+                const hourAngleRad = hourAngleDeg * (Math.PI / 180);
                 
-                ctx.beginPath();
-                ctx.moveTo(sunLine[0].x, sunLine[0].y);
-                
-                for (let i = 1; i < sunLine.length; i++) {
-                    ctx.lineTo(sunLine[i].x, sunLine[i].y);
-                }
-                ctx.stroke();
-                
-                // 추가로 부드러운 빛 효과
-                ctx.shadowBlur = 40;
-                ctx.lineWidth = 8;
-                ctx.strokeStyle = 'rgba(255, 240, 180, 0.25)';
-                ctx.beginPath();
-                ctx.moveTo(sunLine[0].x, sunLine[0].y);
-                for (let i = 1; i < sunLine.length; i++) {
-                    ctx.lineTo(sunLine[i].x, sunLine[i].y);
-                }
-                ctx.stroke();
+                // tan(lat) = -cos(hourAngle) / tan(declination)
+                const latRad = Math.atan(-Math.cos(hourAngleRad) / Math.tan(safeDecRad));
+                terminatorCoords.push([lon, latRad * (180 / Math.PI)]);
             }
-            
-            // 도시 강조
-            const urlParams = new URLSearchParams(window.location.search);
-            let location = urlParams.get('location') ? urlParams.get('location').toUpperCase() : 'SEOUL';
-            
-            const highlightDot = findHighlightDot(location);
-            const cityInfo = cities[location] || cities['SEOUL'];
-            
-            if (highlightDot) {
-                // 주황색 강조 점
-                ctx.shadowBlur = 30;
-                ctx.shadowColor = '#ff9500';
-                ctx.fillStyle = '#ff9500';
+
+            ctx.beginPath();
+            const lineFeature = { type: "LineString", coordinates: terminatorCoords };
+            path(lineFeature);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)'; // 부드러운 반투명 흰색 라인
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // 3) 타겟 도시 강조 (주황색 점)
+            const projectedPoint = projection([targetCity.lon, targetCity.lat]);
+            if (projectedPoint && projectedPoint[0]) {
+                const [cx, cy] = projectedPoint;
+                
+                ctx.fillStyle = '#ff9f0a';
                 ctx.beginPath();
-                ctx.arc(highlightDot.x, highlightDot.y, 7, 0, Math.PI * 2);
+                ctx.arc(cx, cy, 4, 0, Math.PI * 2);
                 ctx.fill();
                 
-                // 외곽 빛
-                ctx.shadowBlur = 60;
-                ctx.fillStyle = 'rgba(255, 149, 0, 0.35)';
-                ctx.beginPath();
-                ctx.arc(highlightDot.x, highlightDot.y, 14, 0, Math.PI * 2);
+                // 네온 글로우 효과
+                ctx.shadowColor = '#ff9f0a';
+                ctx.shadowBlur = 10;
                 ctx.fill();
+                ctx.shadowBlur = 0; // 글로우 리셋
             }
-            
-            // UI 업데이트
-            updateUI(cityInfo, sunInfo);
+
+            // 루프 반복
+            requestAnimationFrame(draw);
         }
 
-        function updateUI(cityInfo, sunInfo) {
-            // 현재 시간 (UTC)
-            const now = new Date();
-            const utcHours = String(now.getUTCHours()).padStart(2, '0');
-            const utcMinutes = String(now.getUTCMinutes()).padStart(2, '0');
-            document.getElementById('utc').textContent = `UTC ${utcHours}:${utcMinutes}`;
-            
-            // 선택된 도시 시간
-            const cityNameEl = document.getElementById('cityName');
-            const timeEl = document.getElementById('localTime');
-            
-            cityNameEl.textContent = cityInfo.ko || cityInfo.name;
-            
-            // 도시별 현지 시간 계산
-            const offsetHours = Math.round(cityInfo.lon / 15);
-            let localHour = (sunInfo.utcHours + offsetHours + 24) % 24;
-            
-            const localH = String(Math.floor(localHour)).padStart(2, '0');
-            const localM = String(now.getUTCMinutes()).padStart(2, '0');
-            
-            timeEl.textContent = `${localH}:${localM}`;
-        }
+        // 실행
+        fetchLocation();
+        initMap();
 
-        // 애니메이션 루프
-        function animate() {
-            draw();
-            requestAnimationFrame(animate);
-        }
-
-        // 초기화
-        function init() {
-            // 캔버스 크기 조정 (반응형)
-            function resize() {
-                const containerWidth = Math.min(window.innerWidth * 0.95, 1200);
-                const ratio = 600 / 1200;
-                width = containerWidth;
-                height = containerWidth * ratio;
-                
-                canvas.width = width;
-                canvas.height = height;
-            }
-            
-            window.addEventListener('resize', () => {
-                resize();
-                generateDots();
-            });
-            
-            resize();
-            generateDots();
-            
-            // 초기 그리기
-            animate();
-            
-            // 10초마다 재생성 (더 자연스럽게)
-            setInterval(() => {
-                generateDots();
-            }, 10000);
-        }
-
-        // URL 변경 감지 (브라우저 뒤로가기 등)
-        window.addEventListener('popstate', () => {
-            // 필요시 재그리기
-        });
-
-        // 시작
-        window.onload = init;
     </script>
 </body>
 </html>
