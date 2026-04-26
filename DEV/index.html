@@ -1,372 +1,288 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>NEMO Watch World Clock</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEMO Watch World Clock</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
 
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="https://unpkg.com/topojson-client@3"></script>
+        .widget-container {
+            position: relative;
+            width: 100%;
+            max-width: 1000px;
+            aspect-ratio: 2.2 / 1;
+            background-color: #000;
+            border-radius: 20px;
+            overflow: hidden;
+        }
 
-<style>
-html,body{
-    margin:0;
-    padding:0;
-    background:#000;
-    width:100%;
-    height:100%;
-    overflow:hidden;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-}
-body{
-    display:flex;
-    justify-content:center;
-    align-items:center;
-}
-.widget-container{
-    position:relative;
-    width:100%;
-    height:100%;
-    background:#000;
-    overflow:hidden;
-}
-canvas{
-    width:100%;
-    height:100%;
-    display:block;
-}
-.info-overlay{
-    position:absolute;
-    left:40px;
-    bottom:30px;
-    z-index:5;
-    pointer-events:none;
-    text-shadow:0 2px 12px rgba(0,0,0,.8);
-}
-.location-name{
-    color:#00F918;
-    font-weight:700;
-    font-size:1.15rem;
-    letter-spacing:.04em;
-}
-.local-time{
-    font-size:5rem;
-    line-height:1;
-    font-weight:600;
-    margin-top:4px;
-}
-.hide-ui{
-    display:none !important;
-}
-</style>
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .info-overlay {
+            position: absolute;
+            bottom: 30px;
+            left: 40px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+        }
+
+        .location-name {
+            color: #00F918;
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: -5px;
+            text-transform: uppercase;
+        }
+
+        .local-time {
+            font-size: 5.5rem;
+            font-weight: 600;
+            letter-spacing: -2px;
+            margin: 0;
+            line-height: 1.1;
+        }
+    </style>
 </head>
 <body>
 
-<div class="widget-container">
-    <canvas id="map"></canvas>
-
-    <div class="info-overlay" id="overlay">
-        <div class="location-name" id="loc-name">SEOUL</div>
-        <div class="local-time" id="loc-time">--:--</div>
+    <div class="widget-container">
+        <canvas id="map-canvas"></canvas>
+        
+        <div class="info-overlay" id="info-overlay">
+            <div class="location-name" id="loc-name">SEOUL</div>
+            <div class="local-time" id="loc-time">--:--</div>
+        </div>
     </div>
-</div>
 
-<script>
-/* ======================================================
-   URL 사용법
+    <script>
+        const canvas = document.getElementById('map-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const width = 1000;
+        const height = 454;
+        canvas.width = width;
+        canvas.height = height;
 
-   ?location=SUWON
-   ?location=SUWON&DEV
-   ?location=SUWON&notime
-   ?location=SUWON&NEMO
-   ?location=SUWON&DEV&NEMO&notime
-====================================================== */
+        let targetCity = { name: 'SEOUL', lon: 126.9780, lat: 37.5665 };
+        let currentTimezone = 'Asia/Seoul';
+        let landDots = [];
 
-const canvas = document.getElementById("map");
-const ctx = canvas.getContext("2d");
+        // DEV 모드 설정 (기본: 실제 시간)
+        let timeSpeed = 1;        // 1 = 실제 시간, DEV 모드에서는 288 (24시간 = 5분)
+        let simulationStartTime = Date.now();
+        let realStartTime = Date.now();
 
-let width = innerWidth;
-let height = innerHeight;
+        // NEMO 모드 (중앙 정렬)
+        let isNemoMode = false;
+        let nemoScale = 160;
+        let nemoTranslateX = width / 2;
+        let nemoTranslateY = height / 2;
 
-canvas.width = width;
-canvas.height = height;
+        const projectionBase = d3.geoEquirectangular();
+        let projection = projectionBase.translate([width / 2, height / 2]).scale(160);
+        let path = d3.geoPath().projection(projection).context(ctx);
 
-const params = new URLSearchParams(location.search);
-
-const MODE_DEV    = params.has("DEV");
-const MODE_NEMO   = params.has("NEMO");
-const MODE_NOTIME = params.has("notime");
-
-let targetCity = {
-    name: params.get("location") || "SEOUL",
-    lat: 37.5665,
-    lon: 126.9780
-};
-
-let currentTimezone = "Asia/Seoul";
-
-if(MODE_NOTIME){
-    document.getElementById("overlay").classList.add("hide-ui");
-}
-
-document.getElementById("loc-name").textContent =
-targetCity.name.toUpperCase();
-
-let projection;
-let geoPath;
-let landDots = [];
-let worldLand = null;
-
-/* =========================
-   시간 가속 DEV 모드
-   24시간 = 5분
-========================= */
-const DEV_DAY_MS = 5 * 60 * 1000; // 5분
-const REAL_DAY_MS = 24 * 60 * 60 * 1000;
-const DEV_RATIO = REAL_DAY_MS / DEV_DAY_MS;
-
-const devStartReal = Date.now();
-const devStartSim = new Date();
-
-function getNow(){
-    if(!MODE_DEV) return new Date();
-
-    const elapsed = Date.now() - devStartReal;
-    const simElapsed = elapsed * DEV_RATIO;
-    return new Date(devStartSim.getTime() + simElapsed);
-}
-
-/* =========================
-   Projection 생성
-========================= */
-function buildProjection(){
-
-    const scale = Math.min(width,height) * 0.28;
-
-    projection = d3.geoEquirectangular()
-        .translate([width/2,height/2])
-        .scale(scale);
-
-    if(MODE_NEMO){
-        projection.center([targetCity.lon,targetCity.lat]);
-    }
-
-    geoPath = d3.geoPath().projection(projection).context(ctx);
-}
-
-/* =========================
-   태양 위치 계산
-========================= */
-function getSunPosition(date){
-
-    const start = Date.UTC(date.getUTCFullYear(),0,0);
-    const now = date.getTime();
-    const day = Math.floor((now-start)/86400000);
-
-    const dec =
-        -23.44 *
-        Math.cos((360/365)*(day+10)*Math.PI/180);
-
-    const utc =
-        date.getUTCHours() +
-        date.getUTCMinutes()/60 +
-        date.getUTCSeconds()/3600;
-
-    let lon = 180 - utc*15;
-
-    while(lon>180) lon-=360;
-    while(lon<-180) lon+=360;
-
-    return {lat:dec,lon};
-}
-
-/* =========================
-   점 데이터 생성
-========================= */
-function buildDots(){
-
-    landDots = [];
-
-    for(let lon=-180; lon<=180; lon+=2.5){
-        for(let lat=-85; lat<=85; lat+=2.5){
-
-            if(d3.geoContains(worldLand,[lon,lat])){
-
-                const p = projection([lon,lat]);
-                if(!p) continue;
-
-                landDots.push({
-                    lon,
-                    lat,
-                    latRad:lat*Math.PI/180,
-                    x:p[0],
-                    y:p[1]
-                });
-            }
+        // 현재 시뮬레이션 시간 반환
+        function getSimulationTime() {
+            if (timeSpeed === 1) return new Date();
+            const elapsedReal = (Date.now() - realStartTime) / 1000; // 초 단위
+            const simulatedMs = elapsedReal * timeSpeed * 1000;
+            return new Date(simulationStartTime + simulatedMs);
         }
-    }
-}
 
-/* =========================
-   렌더링
-========================= */
-function draw(){
+        // 태양 위치 계산 (시뮬레이션 시간 사용)
+        function getSunPosition(date) {
+            const start = new Date(date.getUTCFullYear(), 0, 0);
+            const diff = date - start;
+            const dayOfYear = Math.floor(diff / 86400000);
 
-    const now = getNow();
-    const sun = getSunPosition(now);
+            const decDeg = -23.44 * Math.cos((360 / 365) * (dayOfYear + 10) * (Math.PI / 180));
+            
+            const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+            let subsolarLon = 180 - (utcHours * 15);
+            if (subsolarLon > 180) subsolarLon -= 360;
+            if (subsolarLon < -180) subsolarLon += 360;
 
-    ctx.clearRect(0,0,width,height);
+            return { lon: subsolarLon, lat: decDeg };
+        }
 
-    const dec = sun.lat * Math.PI/180;
-    const sub = sun.lon * Math.PI/180;
+        // 지도 초기화
+        function initMap() {
+            d3.json('https://unpkg.com/world-atlas@2.0.2/countries-110m.json').then(world => {
+                const landFeature = topojson.feature(world, world.objects.land);
+                
+                landDots = [];
+                for(let lon = -180; lon <= 180; lon += 2.5) {
+                    for(let lat = -85; lat <= 85; lat += 2.5) {
+                        if (d3.geoContains(landFeature, [lon, lat])) {
+                            const projected = projection([lon, lat]);
+                            if (projected) {
+                                landDots.push({
+                                    lon: lon,
+                                    lat: lat,
+                                    latRad: lat * Math.PI / 180,
+                                    x: projected[0],
+                                    y: projected[1]
+                                });
+                            }
+                        }
+                    }
+                }
+                requestAnimationFrame(draw);
+            }).catch(err => console.error("맵 데이터 로드 실패", err));
+        }
 
-    const sinDec = Math.sin(dec);
-    const cosDec = Math.cos(dec);
+        // 메인 드로우 루프
+        function draw() {
+            const now = getSimulationTime();
+            const sunPos = getSunPosition(now);
+            
+            const decRad = sunPos.lat * Math.PI / 180;
+            const subLonRad = sunPos.lon * Math.PI / 180;
+            const sinDec = Math.sin(decRad);
+            const cosDec = Math.cos(decRad);
 
-    /* 점 지도 */
-    for(const dot of landDots){
+            ctx.clearRect(0, 0, width, height);
 
-        const lonRad = dot.lon*Math.PI/180;
-        const H = lonRad - sub;
+            // 주야간 점 렌더링
+            landDots.forEach(dot => {
+                const lonRad = dot.lon * Math.PI / 180;
+                const H = lonRad - subLonRad;
+                const altitudeSin = Math.sin(dot.latRad) * sinDec + Math.cos(dot.latRad) * cosDec * Math.cos(H);
+                const isDay = altitudeSin > 0;
 
-        const altitude =
-            Math.sin(dot.latRad)*sinDec +
-            Math.cos(dot.latRad)*cosDec*Math.cos(H);
+                ctx.fillStyle = isDay ? '#ffffff' : '#3a3a3c';
+                ctx.beginPath();
+                ctx.arc(dot.x, dot.y, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
 
-        ctx.fillStyle =
-            altitude > 0 ? "#fff" : "#3a3a3c";
+            // 주야간 경계선
+            const terminatorCircle = d3.geoCircle().center([sunPos.lon, sunPos.lat]).radius(90)();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            path(terminatorCircle);
+            ctx.stroke();
 
-        ctx.beginPath();
-        ctx.arc(dot.x,dot.y,1.25,0,Math.PI*2);
-        ctx.fill();
-    }
+            // 타겟 도시 강조
+            const projectedPoint = projection([targetCity.lon, targetCity.lat]);
+            if (projectedPoint) {
+                ctx.fillStyle = '#00F918';
+                ctx.shadowColor = '#00F918';
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(projectedPoint[0], projectedPoint[1], 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
 
-    /* 경계선 */
-    const term = d3.geoCircle()
-        .center([sun.lon,sun.lat])
-        .radius(90)();
+            requestAnimationFrame(draw);
+        }
 
-    ctx.beginPath();
-    geoPath(term);
-    ctx.strokeStyle="rgba(255,255,255,.35)";
-    ctx.lineWidth=1.4;
-    ctx.stroke();
-
-    /* 도시 표시 */
-    const city = projection([targetCity.lon,targetCity.lat]);
-
-    if(city){
-        ctx.beginPath();
-        ctx.arc(city[0],city[1],5,0,Math.PI*2);
-        ctx.fillStyle="#00F918";
-        ctx.shadowColor="#00F918";
-        ctx.shadowBlur=14;
-        ctx.fill();
-        ctx.shadowBlur=0;
-    }
-
-    requestAnimationFrame(draw);
-}
-
-/* =========================
-   시계 표시
-========================= */
-function updateClock(){
-
-    if(MODE_NOTIME) return;
-
-    const now = getNow();
-
-    try{
-        const txt = new Intl.DateTimeFormat("en-GB",{
-            timeZone:currentTimezone,
-            hour:"2-digit",
-            minute:"2-digit",
-            hour12:false
-        }).format(now);
-
-        document.getElementById("loc-time").textContent = txt;
-
-    }catch(e){
-
-        const h = now.getHours().toString().padStart(2,"0");
-        const m = now.getMinutes().toString().padStart(2,"0");
-        document.getElementById("loc-time").textContent =
-        `${h}:${m}`;
-    }
-}
-
-setInterval(updateClock,250);
-
-/* =========================
-   위치 검색
-========================= */
-async function setupLocation(){
-
-    const q = params.get("location");
-    if(!q) return;
-
-    try{
-        const geo = await fetch(
-            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`
-        ).then(r=>r.json());
-
-        if(geo && geo.length){
-
-            targetCity.lat = +geo[0].lat;
-            targetCity.lon = +geo[0].lon;
-
-            const tz = await fetch(
-                `https://api.open-meteo.com/v1/forecast?latitude=${targetCity.lat}&longitude=${targetCity.lon}&current_weather=true&timezone=auto`
-            ).then(r=>r.json());
-
-            if(tz.timezone){
-                currentTimezone = tz.timezone;
+        // 시계 업데이트 (시뮬레이션 시간 사용)
+        function updateClock() {
+            const now = getSimulationTime();
+            const options = { 
+                timeZone: currentTimezone, 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                hour12: false 
+            };
+            try {
+                const timeString = new Intl.DateTimeFormat('en-GB', options).format(now);
+                document.getElementById('loc-time').innerText = timeString;
+            } catch(e) {
+                const fallbackTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                document.getElementById('loc-time').innerText = fallbackTime;
             }
         }
 
-    }catch(err){
-        console.log(err);
-    }
-}
+        // URL 파라미터 처리
+        async function setupLocation() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryLoc = urlParams.get('location');
+            const isDev = urlParams.has('DEV') || urlParams.has('dev');
+            const isNoTime = urlParams.has('notime') || urlParams.has('noTime');
+            const isNemo = urlParams.has('NEMO') || urlParams.has('nemo');
 
-/* =========================
-   초기화
-========================= */
-async function init(){
+            // DEV 모드
+            if (isDev) {
+                timeSpeed = 288; // 24시간 = 5분 (24*60 / 5 = 288배속)
+                console.log('%c🚀 DEV 모드 활성화: 24시간 = 5분 빠른 시뮬레이션', 'color:#00F918; font-weight:bold');
+            }
 
-    await setupLocation();
+            // notime 모드
+            if (isNoTime) {
+                document.getElementById('info-overlay').style.display = 'none';
+                console.log('%c⏰ 시간/지명 표시 OFF', 'color:#888');
+            }
 
-    buildProjection();
+            // NEMO 모드 (중앙 정렬)
+            if (isNemo) {
+                isNemoMode = true;
+                nemoScale = 220; // 조금 더 확대
+                console.log('%c🌍 NEMO 모드: 도시 중앙 정렬', 'color:#00F918; font-weight:bold');
+            }
 
-    const world = await d3.json(
-        "https://unpkg.com/world-atlas@2.0.2/countries-110m.json"
-    );
+            if (queryLoc) {
+                targetCity.name = decodeURIComponent(queryLoc.split('?')[0]).toUpperCase(); // ?DEV 등 제거
+                document.getElementById('loc-name').innerText = targetCity.name;
+                
+                try {
+                    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryLoc)}&format=json&limit=1`);
+                    const geoData = await geoRes.json();
+                    
+                    if (geoData && geoData.length > 0) {
+                        targetCity.lon = parseFloat(geoData[0].lon);
+                        targetCity.lat = parseFloat(geoData[0].lat);
 
-    worldLand =
-        topojson.feature(world,world.objects.land);
+                        const tzRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${targetCity.lat}&longitude=${targetCity.lon}&current_weather=true&timezone=auto`);
+                        const tzData = await tzRes.json();
+                        if (tzData.timezone) currentTimezone = tzData.timezone;
+                    }
+                } catch (err) {
+                    console.error("위치 또는 타임존 정보를 불러오는 데 실패했습니다.", err);
+                }
+            } else {
+                document.getElementById('loc-name').innerText = targetCity.name;
+            }
 
-    buildDots();
-    updateClock();
-    draw();
-}
+            // NEMO 모드일 경우 투영 재설정 (도시를 중앙에 배치)
+            if (isNemoMode) {
+                projection = projectionBase
+                    .translate([nemoTranslateX, nemoTranslateY])
+                    .scale(nemoScale)
+                    .center([targetCity.lon, targetCity.lat]); // 중심을 도시로 설정
+                path = d3.geoPath().projection(projection).context(ctx);
+            }
 
-init();
+            updateClock();
+            setInterval(updateClock, 1000); // 1초마다 업데이트 (시뮬레이션 시간 반영)
+        }
 
-/* =========================
-   리사이즈
-========================= */
-addEventListener("resize",()=>{
-
-    width = innerWidth;
-    height = innerHeight;
-
-    canvas.width = width;
-    canvas.height = height;
-
-    buildProjection();
-    if(worldLand) buildDots();
-});
-</script>
+        // 실행
+        setupLocation().then(initMap);
+    </script>
 </body>
 </html>
